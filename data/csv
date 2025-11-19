@@ -1,0 +1,17 @@
+Group,Position,Level,Color
+MAYORAL_OFFICE,Mayor,1,#D32F2F
+MAYORAL_OFFICE,Vice Mayor,1,#D32F2F
+MAYORAL_OFFICE,Municipal Vice Mayor,1,#D32F2F
+CITY_COUNCIL,City Councilor,2,#FBC02D
+CITY_COUNCIL,Municipal Councilor,2,#FBC02D
+CITY_COUNCIL,Councilor,2,#FBC02D
+CITY_COUNCIL,Chairman,2,#FBC02D
+PUNONG_BRGY,Barangay Captain,3,#1976D2
+PUNONG_BRGY,Brgy Captain,3,#1976D2
+PUNONG_BRGY,Barangay Chairman,3,#1976D2
+PUNONG_BRGY,Brgy Chairman,3,#1976D2
+BRGY_KAGAWAD,Barangay Kagawad,4,#388E3C
+BRGY_KAGAWAD,Brgy Kagawad,4,#388E3C
+SK_OFFICE,SK Chairman,5,#607D8B
+SK_OFFICE,SK Chairperson,5,#607D8B
+SK_OFFICE,Kagawad – SK,5,#607D8B
