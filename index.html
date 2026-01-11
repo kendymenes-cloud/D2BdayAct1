@@ -364,483 +364,494 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <script>
-        // === CONFIGURATION ===
-        const DB_NAME = 'D2BirthdayApp_v8_2'; 
-        const DB_VER = 1;
-        let db;
-        let PRIORITY_MAP = {};
-        let CURRENT_DATA = []; 
-        let ALL_OFFICIALS_CACHE = []; 
-        let sortState = { col: 'priority', dir: 'asc' };
+<script>
+    // === CONFIGURATION ===
+    // CHANGED: Updated DB name to force a fresh import on reload
+    const DB_NAME = 'D2BirthdayApp_v8_3'; 
+    const DB_VER = 1;
+    let db;
+    let PRIORITY_MAP = {};
+    let CURRENT_DATA = []; 
+    let ALL_OFFICIALS_CACHE = []; 
+    let sortState = { col: 'priority', dir: 'asc' };
 
-        // === INITIALIZATION ===
-        window.onload = async () => {
-            await initDB();
-            const count = await getCount('officials');
-            if (count > 0) {
-                loadApp();
-            }
-        };
+    // === INITIALIZATION ===
+    window.onload = async () => {
+        await initDB();
+        const count = await getCount('officials');
+        if (count > 0) {
+            loadApp();
+        }
+    };
 
-        // === DATABASE ===
-        function initDB() {
-            return new Promise((resolve, reject) => {
-                const req = indexedDB.open(DB_NAME, DB_VER);
-                req.onupgradeneeded = e => {
-                    const db = e.target.result;
-                    if (!db.objectStoreNames.contains('officials')) db.createObjectStore('officials', { keyPath: 'id', autoIncrement: true });
-                    if (!db.objectStoreNames.contains('logs')) {
-                        const st = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
-                        st.createIndex('date', 'date', { unique: false });
-                        st.createIndex('refId_date', ['refId', 'date'], { unique: true });
-                    }
-                };
-                req.onsuccess = e => { db = e.target.result; resolve(); };
-                req.onerror = e => reject(e);
-            });
-        }
+    // === DATABASE ===
+    function initDB() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, DB_VER);
+            req.onupgradeneeded = e => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('officials')) db.createObjectStore('officials', { keyPath: 'id', autoIncrement: true });
+                if (!db.objectStoreNames.contains('logs')) {
+                    const st = db.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                    st.createIndex('date', 'date', { unique: false });
+                    st.createIndex('refId_date', ['refId', 'date'], { unique: true });
+                }
+            };
+            req.onsuccess = e => { db = e.target.result; resolve(); };
+            req.onerror = e => reject(e);
+        });
+    }
 
-        function getCount(store) {
-            return new Promise(resolve => {
-                const tx = db.transaction(store, 'readonly');
-                const req = tx.objectStore(store).count();
-                req.onsuccess = () => resolve(req.result);
-            });
-        }
+    function getCount(store) {
+        return new Promise(resolve => {
+            const tx = db.transaction(store, 'readonly');
+            const req = tx.objectStore(store).count();
+            req.onsuccess = () => resolve(req.result);
+        });
+    }
 
-        // === IMPORT PROCESS ===
-        document.getElementById('btn-import').onclick = async () => {
-            const btn = document.getElementById('btn-import');
-            const pBar = document.getElementById('progress-bar');
-            const stat = document.getElementById('status-text');
-            btn.style.display = 'none';
-            stat.innerText = "Fetching Files...";
+    // === IMPORT PROCESS ===
+    document.getElementById('btn-import').onclick = async () => {
+        const btn = document.getElementById('btn-import');
+        const pBar = document.getElementById('progress-bar');
+        const stat = document.getElementById('status-text');
+        btn.style.display = 'none';
+        stat.innerText = "Fetching Files...";
 
-            try {
-                // 1. Load Priority Levels
-                const pRes = await fetch('data/priority_levels.csv');
-                if(!pRes.ok) throw new Error("Missing data/priority_levels.csv");
-                const pText = await pRes.text();
-                const pData = Papa.parse(pText, { header: true, skipEmptyLines: true }).data;
-                
-                PRIORITY_MAP = {};
-                pData.forEach(r => {
-                    if(r.Position) {
-                        // CRITICAL FIX: Normalize priority map keys
-                        const key = r.Position.toUpperCase().trim();
-                        PRIORITY_MAP[key] = parseInt(r.Level);
-                    }
-                });
+        try {
+            // 1. Load Priority Levels
+            const pRes = await fetch('data/priority_levels.csv');
+            if(!pRes.ok) throw new Error("Missing data/priority_levels.csv");
+            const pText = await pRes.text();
+            const pData = Papa.parse(pText, { header: true, skipEmptyLines: true }).data;
+            
+            PRIORITY_MAP = {};
+            pData.forEach(r => {
+                if(r.Position) {
+                    const key = r.Position.toUpperCase().trim();
+                    PRIORITY_MAP[key] = parseInt(r.Level);
+                }
+            });
 
-                // 2. Load Masterlist
-                const mRes = await fetch('data/masterlist.csv');
-                if(!mRes.ok) throw new Error("Missing data/masterlist.csv");
-                const mText = await mRes.text();
-                const delim = mText.indexOf(';') > -1 ? ';' : ',';
-                const mData = Papa.parse(mText, { header: true, delimiter: delim, skipEmptyLines: true }).data;
+            // 2. Load Masterlist
+            const mRes = await fetch('data/masterlist.csv');
+            if(!mRes.ok) throw new Error("Missing data/masterlist.csv");
+            const mText = await mRes.text();
+            const delim = mText.indexOf(';') > -1 ? ';' : ',';
+            const mData = Papa.parse(mText, { header: true, delimiter: delim, skipEmptyLines: true }).data;
 
-                // 3. Clear & Process
-                const tx = db.transaction(['officials', 'logs'], 'readwrite');
-                tx.objectStore('officials').clear();
-                tx.objectStore('logs').clear();
-                
-                const total = mData.length;
-                const chunkSize = 500;
+            // 3. Clear & Process
+            const tx = db.transaction(['officials', 'logs'], 'readwrite');
+            tx.objectStore('officials').clear();
+            tx.objectStore('logs').clear();
+            
+            const total = mData.length;
+            const chunkSize = 500;
 
-                const headers = Object.keys(mData[0] || {});
-                const nameKey = headers.find(h => h.toLowerCase().includes('name'));
-                const bdayKey = headers.find(h => h.toLowerCase().includes('birthday'));
-                const posKey = headers.find(h => h.toLowerCase().includes('position'));
+            const headers = Object.keys(mData[0] || {});
+            const nameKey = headers.find(h => h.toLowerCase().includes('name'));
+            const bdayKey = headers.find(h => h.toLowerCase().includes('birthday'));
+            const posKey = headers.find(h => h.toLowerCase().includes('position'));
 
-                if (!nameKey || !bdayKey) throw new Error("CSV Headers Mismatch.");
+            if (!nameKey || !bdayKey) throw new Error("CSV Headers Mismatch.");
 
-                function processChunk(start) {
-                    const txC = db.transaction('officials', 'readwrite');
-                    const store = txC.objectStore('officials');
-                    let i = start;
-                    let end = start + chunkSize;
-                    if(end > total) end = total;
+            function processChunk(start) {
+                const txC = db.transaction('officials', 'readwrite');
+                const store = txC.objectStore('officials');
+                let i = start;
+                let end = start + chunkSize;
+                if(end > total) end = total;
 
-                    while(i < end) {
-                        const row = mData[i];
-                        const name = row[nameKey];
-                        const dateStr = row[bdayKey];
-                        const rawPos = row[posKey] || 'N/A';
-                        
-                        if(name && dateStr) {
-                            let mDate;
-                             if (String(dateStr).match(/^\d{5}$/)) {
-                                mDate = moment('1899-12-30').add(parseInt(dateStr), 'days');
-                            } else {
-                                mDate = moment(dateStr, ['YYYY-MM-DD', 'MM/DD/YYYY', 'D/M/YYYY', 'DD-MM-YYYY', 'M/D/YYYY'], true);
-                            }
+                while(i < end) {
+                    const row = mData[i];
+                    const name = row[nameKey];
+                    const dateStr = row[bdayKey];
+                    const rawPos = row[posKey] || 'N/A';
+                    
+                    if(name && dateStr) {
+                        let mDate;
+                        if (String(dateStr).match(/^\d{5}$/)) {
+                            // Handle Excel serial dates
+                            mDate = moment('1899-12-30').add(parseInt(dateStr), 'days');
+                        } else {
+                            // === FIX APPLIED HERE ===
+                            // Removed 'D/M/YYYY' to prevent 7/1 being read as Jan 7
+                            // Prioritized 'M/D/YYYY' which correctly reads 7/1 as July 1 and handles single digits
+                            mDate = moment(dateStr, ['YYYY-MM-DD', 'M/D/YYYY', 'MM/DD/YYYY'], true);
+                        }
 
-                            if(mDate.isValid() && mDate.year() > 1900) {
-                                // CRITICAL FIX: Clean Masterlist Position before checking map
-                                const cleanPos = rawPos.toUpperCase().trim();
-                                const pLevel = PRIORITY_MAP[cleanPos] || 99;
-                                
-                                let mun = row['Municipality'] || row['municipality'] || '';
-                                let brgy = row['Barangay'] || row['barangay'] || '';
+                        if(mDate.isValid() && mDate.year() > 1900) {
+                            const cleanPos = rawPos.toUpperCase().trim();
+                            const pLevel = PRIORITY_MAP[cleanPos] || 99;
+                            
+                            let mun = row['Municipality'] || row['municipality'] || '';
+                            let brgy = row['Barangay'] || row['barangay'] || '';
 
-                                store.add({
-                                    name: name.trim(),
-                                    bday: mDate.toDate(),
-                                    month: mDate.month() + 1,
-                                    day: mDate.date(),
-                                    monthDay: mDate.format('MM-DD'),
-                                    pos: rawPos.trim(), // Keep original display text
-                                    mun: mun.trim().toUpperCase(),
-                                    brgy: brgy.trim(),
-                                    contact: (row['Contact No.']||'').trim(),
-                                    priority: pLevel
-                                });
-                            }
-                        }
-                        i++;
-                    }
+                            store.add({
+                                name: name.trim(),
+                                bday: mDate.toDate(),
+                                month: mDate.month() + 1,
+                                day: mDate.date(),
+                                monthDay: mDate.format('MM-DD'),
+                                pos: rawPos.trim(),
+                                mun: mun.trim().toUpperCase(),
+                                brgy: brgy.trim(),
+                                contact: (row['Contact No.']||'').trim(),
+                                priority: pLevel
+                            });
+                        }
+                    }
+                    i++;
+                }
 
-                    const pct = Math.round((i/total)*100);
-                    pBar.style.width = pct + "%";
-                    stat.innerText = `Processing ${i} of ${total}`;
+                const pct = Math.round((i/total)*100);
+                pBar.style.width = pct + "%";
+                stat.innerText = `Processing ${i} of ${total}`;
 
-                    txC.oncomplete = () => {
-                        if(i < total) setTimeout(() => processChunk(i), 10);
-                        else {
-                            stat.innerText = "Complete!";
-                            setTimeout(loadApp, 500);
-                        }
-                    };
-                }
-                processChunk(0);
+                txC.oncomplete = () => {
+                    if(i < total) setTimeout(() => processChunk(i), 10);
+                    else {
+                        stat.innerText = "Complete!";
+                        setTimeout(loadApp, 500);
+                    }
+                };
+            }
+            processChunk(0);
 
-            } catch(err) {
-                stat.innerText = "Error: " + err.message;
-                stat.style.color = "red";
-            }
-        };
+        } catch(err) {
+            stat.innerText = "Error: " + err.message;
+            stat.style.color = "red";
+        }
+    };
 
-        // === APP LOGIC ===
-        async function loadApp() {
-            document.getElementById('import-screen').style.display = 'none';
-            document.getElementById('app-screen').style.display = 'block';
-            
-            document.getElementById('filter-search').onkeyup = renderList;
-            document.getElementById('filter-mun').onchange = renderList;
-            document.getElementById('filter-month').onchange = renderList;
-            document.getElementById('toggle-priority').onchange = renderList;
-            document.getElementById('add-form').onsubmit = handleAdd;
+    // === APP LOGIC ===
+    async function loadApp() {
+        document.getElementById('import-screen').style.display = 'none';
+        document.getElementById('app-screen').style.display = 'block';
+        
+        document.getElementById('filter-search').onkeyup = renderList;
+        document.getElementById('filter-mun').onchange = renderList;
+        document.getElementById('filter-month').onchange = renderList;
+        document.getElementById('toggle-priority').onchange = renderList;
+        document.getElementById('add-form').onsubmit = handleAdd;
 
-            await refreshAll();
-        }
+        await refreshAll();
+    }
 
-        async function refreshAll() {
-            setLoading(true);
-            ALL_OFFICIALS_CACHE = [];
-            const tx = db.transaction('officials', 'readonly');
-            tx.objectStore('officials').openCursor().onsuccess = e => {
-                const c = e.target.result;
-                if(c) {
-                    ALL_OFFICIALS_CACHE.push({id: c.key, ...c.value});
-                    c.continue();
-                } else {
-                    populateFilters();
-                    const logTx = db.transaction('logs', 'readonly');
-                    const todayStr = moment().format('YYYY-MM-DD');
-                    const loggedIds = new Set();
-                    logTx.objectStore('logs').openCursor().onsuccess = ev => {
-                        const cur = ev.target.result;
-                        if(cur) {
-                            if(cur.value.date === todayStr) loggedIds.add(cur.value.refId);
-                            cur.continue();
-                        } else {
-                            ALL_OFFICIALS_CACHE.forEach(p => p.isLogged = loggedIds.has(p.id));
-                            updateDashboard();
-                            renderList();
-                            renderMainCharts();
-                            setLoading(false);
-                        }
-                    };
-                }
-            };
-        }
+    async function refreshAll() {
+        setLoading(true);
+        ALL_OFFICIALS_CACHE = [];
+        const tx = db.transaction('officials', 'readonly');
+        tx.objectStore('officials').openCursor().onsuccess = e => {
+            const c = e.target.result;
+            if(c) {
+                ALL_OFFICIALS_CACHE.push({id: c.key, ...c.value});
+                c.continue();
+            } else {
+                populateFilters();
+                const logTx = db.transaction('logs', 'readonly');
+                const todayStr = moment().format('YYYY-MM-DD');
+                const loggedIds = new Set();
+                logTx.objectStore('logs').openCursor().onsuccess = ev => {
+                    const cur = ev.target.result;
+                    if(cur) {
+                        if(cur.value.date === todayStr) loggedIds.add(cur.value.refId);
+                        cur.continue();
+                    } else {
+                        ALL_OFFICIALS_CACHE.forEach(p => p.isLogged = loggedIds.has(p.id));
+                        updateDashboard();
+                        renderList();
+                        renderMainCharts();
+                        setLoading(false);
+                    }
+                };
+            }
+        };
+    }
 
-        function setLoading(isLoading) {
-            const spin = document.getElementById('loading-spinner');
-            spin.style.display = isLoading ? 'block' : 'none';
-        }
+    function setLoading(isLoading) {
+        const spin = document.getElementById('loading-spinner');
+        spin.style.display = isLoading ? 'block' : 'none';
+    }
 
-        // === DASHBOARD ===
-        function updateDashboard() {
-            const today = moment().format('MM-DD');
-            let todayCount = 0, prioCount = 0, upcoming = 0, logged = 0;
-            const start = moment().startOf('day');
-            const end = moment().add(7, 'days');
+    // === DASHBOARD ===
+    function updateDashboard() {
+        const today = moment().format('MM-DD');
+        let todayCount = 0, prioCount = 0, upcoming = 0, logged = 0;
+        const start = moment().startOf('day');
+        const end = moment().add(7, 'days');
 
-            ALL_OFFICIALS_CACHE.forEach(p => {
-                if(p.monthDay === today) {
-                    todayCount++;
-                    if(p.priority <= 5) prioCount++; 
-                }
-                if(p.isLogged) logged++;
-                const bday = moment(p.bday).year(moment().year());
-                if(bday.isBetween(start, end, 'day', '[]')) upcoming++;
-            });
+        ALL_OFFICIALS_CACHE.forEach(p => {
+            if(p.monthDay === today) {
+                todayCount++;
+                if(p.priority <= 5) prioCount++; 
+            }
+            if(p.isLogged) logged++;
+            const bday = moment(p.bday).year(moment().year());
+            if(bday.isBetween(start, end, 'day', '[]')) upcoming++;
+        });
 
-            document.getElementById('d-today').innerText = todayCount;
-            document.getElementById('d-prio').innerText = prioCount;
-            document.getElementById('d-upcoming').innerText = upcoming;
-            document.getElementById('d-total').innerText = ALL_OFFICIALS_CACHE.length;
-        }
+        document.getElementById('d-today').innerText = todayCount;
+        document.getElementById('d-prio').innerText = prioCount;
+        document.getElementById('d-upcoming').innerText = upcoming;
+        document.getElementById('d-total').innerText = ALL_OFFICIALS_CACHE.length;
+    }
 
-        // === LIST RENDERING ===
-        function renderList() {
-            const search = document.getElementById('filter-search').value.toLowerCase();
-            const mun = document.getElementById('filter-mun').value;
-            const month = document.getElementById('filter-month').value;
-            const prioOnly = document.getElementById('toggle-priority').checked;
+    // === LIST RENDERING ===
+    function renderList() {
+        const search = document.getElementById('filter-search').value.toLowerCase();
+        const mun = document.getElementById('filter-mun').value;
+        const month = document.getElementById('filter-month').value;
+        const prioOnly = document.getElementById('toggle-priority').checked;
 
-            let data = ALL_OFFICIALS_CACHE.filter(p => {
-                if(search && !p.name.toLowerCase().includes(search)) return false;
-                if(mun && p.mun !== mun) return false;
-                if(month && p.month != month) return false;
-                if(prioOnly && p.priority > 5) return false;
-                return true;
-            });
+        let data = ALL_OFFICIALS_CACHE.filter(p => {
+            if(search && !p.name.toLowerCase().includes(search)) return false;
+            if(mun && p.mun !== mun) return false;
+            if(month && p.month != month) return false;
+            if(prioOnly && p.priority > 5) return false;
+            return true;
+        });
 
-            CURRENT_DATA = data;
+        CURRENT_DATA = data;
 
-            data.sort((a,b) => {
-                const dir = sortState.dir === 'asc' ? 1 : -1;
-                if(sortState.col === 'priority') return (a.priority - b.priority) * dir;
-                if(sortState.col === 'bday') return ((a.month*100+a.day) - (b.month*100+b.day)) * dir;
-                if(sortState.col === 'name' || sortState.col === 'mun') return a[sortState.col].localeCompare(b[sortState.col]) * dir;
-                return 0;
-            });
+        data.sort((a,b) => {
+            const dir = sortState.dir === 'asc' ? 1 : -1;
+            if(sortState.col === 'priority') return (a.priority - b.priority) * dir;
+            if(sortState.col === 'bday') return ((a.month*100+a.day) - (b.month*100+b.day)) * dir;
+            if(sortState.col === 'name' || sortState.col === 'mun') return a[sortState.col].localeCompare(b[sortState.col]) * dir;
+            return 0;
+        });
 
-            document.getElementById('count-text').innerText = `Showing ${Math.min(200, data.length)} of ${data.length} matches`;
-            const tbody = document.getElementById('table-body');
-            
-            if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px;">No records found.</td></tr>';
-                return;
-            }
+        document.getElementById('count-text').innerText = `Showing ${Math.min(200, data.length)} of ${data.length} matches`;
+        const tbody = document.getElementById('table-body');
+        
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px;">No records found.</td></tr>';
+            return;
+        }
 
-            const displayData = data.slice(0, 200); 
-            tbody.innerHTML = displayData.map(p => `
-                <tr>
-                    <td><span class="badge" data-p="${p.priority}">P${p.priority}</span></td>
-                    <td>${moment(p.bday).format('MMM D')}</td>
-                    <td class="name-p${p.priority}">${p.name}</td>
-                    <td>${p.pos}</td>
-                    <td>${p.brgy}</td>
-                    <td>${p.mun}</td>
-                    <td>${p.contact ? `<a href="tel:${p.contact}" style="color:inherit;">${p.contact}</a>` : ''}</td>
-                    <td>
-                        <button class="btn-main ${p.isLogged?'logged':''}" 
-                                style="font-size:0.75rem; padding: 6px 12px; background: ${p.isLogged?'#aaa':''}; box-shadow: none;"
-                                onclick="toggleLog(${p.id}, ${p.isLogged})">
-                            ${p.isLogged ? 'Un-Log' : 'Log'}
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
-        }
+        const displayData = data.slice(0, 200); 
+        tbody.innerHTML = displayData.map(p => `
+            <tr>
+                <td><span class="badge" data-p="${p.priority}">P${p.priority}</span></td>
+                <td>${moment(p.bday).format('MMM D')}</td>
+                <td class="name-p${p.priority}">${p.name}</td>
+                <td>${p.pos}</td>
+                <td>${p.brgy}</td>
+                <td>${p.mun}</td>
+                <td>${p.contact ? `<a href="tel:${p.contact}" style="color:inherit;">${p.contact}</a>` : ''}</td>
+                <td>
+                    <button class="btn-main ${p.isLogged?'logged':''}" 
+                            style="font-size:0.75rem; padding: 6px 12px; background: ${p.isLogged?'#aaa':''}; box-shadow: none;"
+                            onclick="toggleLog(${p.id}, ${p.isLogged})">
+                        ${p.isLogged ? 'Un-Log' : 'Log'}
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
 
-        function handleSort(col) {
-            if(sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
-            else { sortState.col = col; sortState.dir = 'asc'; }
-            renderList();
-        }
+    function handleSort(col) {
+        if(sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+        else { sortState.col = col; sortState.dir = 'asc'; }
+        renderList();
+    }
 
-        function populateFilters() {
-            const muns = new Set();
-            ALL_OFFICIALS_CACHE.forEach(p => { if(p.mun) muns.add(p.mun); });
-            const sel = document.getElementById('filter-mun');
-            const currentVal = sel.value;
-            sel.innerHTML = '<option value="">All Municipalities</option>';
-            Array.from(muns).sort().forEach(m => {
-                const opt = document.createElement('option');
-                opt.value = m; opt.innerText = m;
-                sel.appendChild(opt);
-            });
-            sel.value = currentVal; 
-        }
+    function populateFilters() {
+        const muns = new Set();
+        ALL_OFFICIALS_CACHE.forEach(p => { if(p.mun) muns.add(p.mun); });
+        const sel = document.getElementById('filter-mun');
+        const currentVal = sel.value;
+        sel.innerHTML = '<option value="">All Municipalities</option>';
+        Array.from(muns).sort().forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m; opt.innerText = m;
+            sel.appendChild(opt);
+        });
+        sel.value = currentVal; 
+    }
 
-        // === POPUPS & CHARTS ===
-        function openQuickView(type) {
-            const today = moment().format('MM-DD');
-            let data = [];
-            let title = "";
-            
-            if(type === 'today') {
-                data = ALL_OFFICIALS_CACHE.filter(p => p.monthDay === today);
-                title = "Today's Birthdays";
-            } else if (type === 'priority') {
-                data = ALL_OFFICIALS_CACHE.filter(p => p.monthDay === today && p.priority <= 5);
-                title = "Priority Birthdays (L1-L5)";
-            } else if (type === 'upcoming') {
-                 const start = moment().startOf('day');
-                 const end = moment().add(7, 'days');
-                 data = ALL_OFFICIALS_CACHE.filter(p => moment(p.bday).year(moment().year()).isBetween(start, end, 'day', '[]'));
-                 title = "Upcoming 7 Days";
-            }
+    // === POPUPS & CHARTS ===
+    function openQuickView(type) {
+        const today = moment().format('MM-DD');
+        let data = [];
+        let title = "";
+        
+        if(type === 'today') {
+            data = ALL_OFFICIALS_CACHE.filter(p => p.monthDay === today);
+            title = "Today's Birthdays";
+        } else if (type === 'priority') {
+            data = ALL_OFFICIALS_CACHE.filter(p => p.monthDay === today && p.priority <= 5);
+            title = "Priority Birthdays (L1-L5)";
+        } else if (type === 'upcoming') {
+                const start = moment().startOf('day');
+                const end = moment().add(7, 'days');
+                data = ALL_OFFICIALS_CACHE.filter(p => moment(p.bday).year(moment().year()).isBetween(start, end, 'day', '[]'));
+                title = "Upcoming 7 Days";
+        }
 
-            document.getElementById('modal-title').innerText = title;
-            const tbody = document.getElementById('modal-body-content');
-            tbody.innerHTML = data.map(p => `
-                <tr>
-                    <td><span class="badge" data-p="${p.priority}">P${p.priority}</span></td>
-                    <td>${moment(p.bday).format('MMM D')}</td>
-                    <td class="name-p${p.priority}">${p.name}</td>
-                    <td>${p.pos}</td>
-                    <td>${p.contact}</td>
-                    <td><button class="btn-main" style="font-size:0.7rem; padding:5px; box-shadow: none;" onclick="toggleLog(${p.id}, ${p.isLogged}); this.innerText='Done'">Log</button></td>
-                </tr>
-            `).join('');
-            document.getElementById('modal-quick').style.display = 'block';
-        }
+        document.getElementById('modal-title').innerText = title;
+        const tbody = document.getElementById('modal-body-content');
+        tbody.innerHTML = data.map(p => `
+            <tr>
+                <td><span class="badge" data-p="${p.priority}">P${p.priority}</span></td>
+                <td>${moment(p.bday).format('MMM D')}</td>
+                <td class="name-p${p.priority}">${p.name}</td>
+                <td>${p.pos}</td>
+                <td>${p.contact}</td>
+                <td><button class="btn-main" style="font-size:0.7rem; padding:5px; box-shadow: none;" onclick="toggleLog(${p.id}, ${p.isLogged}); this.innerText='Done'">Log</button></td>
+            </tr>
+        `).join('');
+        document.getElementById('modal-quick').style.display = 'block';
+    }
 
-        // NEW: TOTAL OFFICIALS POPUP (Interactive Graph)
-        let totalChart;
-        function openTotalStats() {
-            document.getElementById('modal-total').style.display = 'block';
-            
-            const months = Array(12).fill(0);
-            ALL_OFFICIALS_CACHE.forEach(p => months[p.month - 1]++);
-            
-            const ctx = document.getElementById('chart-total-popup').getContext('2d');
-            if(totalChart) totalChart.destroy();
-            
-            totalChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-                    datasets: [{
-                        label: 'Birthdays per Month',
-                        data: months,
-                        borderColor: '#126c39',
-                        backgroundColor: 'rgba(18, 108, 57, 0.1)',
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 5,
-                        pointHoverRadius: 8
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: {display: false} },
-                    scales: { y: {beginAtZero: true} }
-                }
-            });
-        }
+    let totalChart;
+    function openTotalStats() {
+        document.getElementById('modal-total').style.display = 'block';
+        
+        const months = Array(12).fill(0);
+        ALL_OFFICIALS_CACHE.forEach(p => months[p.month - 1]++);
+        
+        const ctx = document.getElementById('chart-total-popup').getContext('2d');
+        if(totalChart) totalChart.destroy();
+        
+        totalChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+                datasets: [{
+                    label: 'Birthdays per Month',
+                    data: months,
+                    borderColor: '#126c39',
+                    backgroundColor: 'rgba(18, 108, 57, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 5,
+                    pointHoverRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: {display: false} },
+                scales: { y: {beginAtZero: true} }
+            }
+        });
+    }
 
-        // MAIN CHARTS (Rank Distribution)
-        let chartDist, chartPie;
-        function renderMainCharts() {
-            // Prepare Data for Specific Groups
-            const counts = { p1:0, p2:0, p3:0, p4:0, p5:0 };
-            ALL_OFFICIALS_CACHE.forEach(p => {
-                if(p.priority === 1) counts.p1++;
-                if(p.priority === 2) counts.p2++;
-                if(p.priority === 3) counts.p3++;
-                if(p.priority === 4) counts.p4++;
-                if(p.priority === 5) counts.p5++;
-            });
+    let chartDist, chartPie;
+    function renderMainCharts() {
+        const counts = { p1:0, p2:0, p3:0, p4:0, p5:0 };
+        ALL_OFFICIALS_CACHE.forEach(p => {
+            if(p.priority === 1) counts.p1++;
+            if(p.priority === 2) counts.p2++;
+            if(p.priority === 3) counts.p3++;
+            if(p.priority === 4) counts.p4++;
+            if(p.priority === 5) counts.p5++;
+        });
 
-            // Destroy Old
-            if(chartDist) chartDist.destroy();
-            if(chartPie) chartPie.destroy();
+        if(chartDist) chartDist.destroy();
+        if(chartPie) chartPie.destroy();
 
-            Chart.defaults.font.family = "'Poppins', sans-serif";
+        Chart.defaults.font.family = "'Poppins', sans-serif";
 
-            // 1. BAR GRAPH: Breakdown by Level
-            const ctx1 = document.getElementById('chart-distribution').getContext('2d');
-            chartDist = new Chart(ctx1, {
-                type: 'bar',
-                data: {
-                    labels: ['Mayors/VM (P1)', 'Councilors (P2)', 'Captains (P3)', 'Kagawads (P4)', 'SK Chair (P5)'],
-                    datasets: [{
-                        label: 'Count',
-                        data: [counts.p1, counts.p2, counts.p3, counts.p4, counts.p5],
-                        backgroundColor: ['#a9181d', '#f57f17', '#0277bd', '#2e7d32', '#607D8B'],
-                        borderRadius: 5
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {display: false},
-                        title: {display: true, text: 'Official Distribution by Rank', font: {size: 16}}
-                    },
-                    scales: { y: {beginAtZero: true} }
-                }
-            });
+        const ctx1 = document.getElementById('chart-distribution').getContext('2d');
+        chartDist = new Chart(ctx1, {
+            type: 'bar',
+            data: {
+                labels: ['Mayors/VM (P1)', 'Councilors (P2)', 'Captains (P3)', 'Kagawads (P4)', 'SK Chair (P5)'],
+                datasets: [{
+                    label: 'Count',
+                    data: [counts.p1, counts.p2, counts.p3, counts.p4, counts.p5],
+                    backgroundColor: ['#a9181d', '#f57f17', '#0277bd', '#2e7d32', '#607D8B'],
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {display: false},
+                    title: {display: true, text: 'Official Distribution by Rank', font: {size: 16}}
+                },
+                scales: { y: {beginAtZero: true} }
+            }
+        });
 
-            // 2. PIE GRAPH: Overall Mix
-            const ctx2 = document.getElementById('chart-pie').getContext('2d');
-            chartPie = new Chart(ctx2, {
-                type: 'doughnut',
-                data: {
-                    labels: ['P1','P2','P3','P4','P5','Others'],
-                    datasets: [{ 
-                        data: [counts.p1, counts.p2, counts.p3, counts.p4, counts.p5, ALL_OFFICIALS_CACHE.length - (counts.p1+counts.p2+counts.p3+counts.p4+counts.p5)], 
-                        backgroundColor: ['#a9181d', '#f57f17', '#0277bd', '#2e7d32', '#607D8B', '#e0e0e0'] 
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false, plugins: {title: {display: true, text: 'Database Composition', font: {size: 16}}} }
-            });
-        }
+        const ctx2 = document.getElementById('chart-pie').getContext('2d');
+        chartPie = new Chart(ctx2, {
+            type: 'doughnut',
+            data: {
+                labels: ['P1','P2','P3','P4','P5','Others'],
+                datasets: [{ 
+                    data: [counts.p1, counts.p2, counts.p3, counts.p4, counts.p5, ALL_OFFICIALS_CACHE.length - (counts.p1+counts.p2+counts.p3+counts.p4+counts.p5)], 
+                    backgroundColor: ['#a9181d', '#f57f17', '#0277bd', '#2e7d32', '#607D8B', '#e0e0e0'] 
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: {title: {display: true, text: 'Database Composition', font: {size: 16}}} }
+        });
+    }
 
-        // === LOGGING & EXPORT ===
-        async function toggleLog(id, isLogged) {
-            const date = moment().format('YYYY-MM-DD');
-            const tx = db.transaction('logs', 'readwrite');
-            const store = tx.objectStore('logs');
+    // === LOGGING & EXPORT ===
+    async function toggleLog(id, isLogged) {
+        const date = moment().format('YYYY-MM-DD');
+        const tx = db.transaction('logs', 'readwrite');
+        const store = tx.objectStore('logs');
 
-            if(isLogged) {
-                if(!confirm("Un-log this greeting?")) return;
-                const idx = store.index('refId_date');
-                const req = idx.getKey([id, date]);
-                req.onsuccess = e => { if(e.target.result) store.delete(e.target.result); };
-            } else {
-                store.add({ refId: id, date: date, timestamp: new Date() });
-            }
-            tx.oncomplete = () => refreshAll();
-        }
+        if(isLogged) {
+            if(!confirm("Un-log this greeting?")) return;
+            const idx = store.index('refId_date');
+            const req = idx.getKey([id, date]);
+            req.onsuccess = e => { if(e.target.result) store.delete(e.target.result); };
+        } else {
+            store.add({ refId: id, date: date, timestamp: new Date() });
+        }
+        tx.oncomplete = () => refreshAll();
+    }
 
-        function handleExportCSV() {
-            if(!CURRENT_DATA.length) return alert("No data to export");
-            let csv = "Priority,Birthday,Name,Position,Barangay,Municipality,Contact,Logged\n";
-            CURRENT_DATA.forEach(p => {
-                csv += `P${p.priority},${moment(p.bday).format('YYYY-MM-DD')},"${p.name}","${p.pos}","${p.brgy}","${p.mun}","${p.contact}",${p.isLogged?'Yes':'No'}\n`;
-            });
-            const blob = new Blob([csv], {type:'text/csv'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = 'Birthday_Export.csv';
-            a.click();
-        }
+    // FIXED RE-SYNC LOGIC: Now actually deletes the database
+    function handleResync() {
+        if(confirm('Re-Sync will wipe all data and reload the page. Continue?')) {
+            const req = indexedDB.deleteDatabase(DB_NAME);
+            req.onsuccess = () => location.reload();
+            req.onerror = () => alert("Could not delete database. Please clear browser cache manually.");
+            req.onblocked = () => alert("Database deletion blocked. Close other tabs of this app and try again.");
+        }
+    }
+    
+    // Bind the new handler to the button (you'll need to update the HTML button onclick too, or just use this script block)
+    document.querySelector('.btn-resync').onclick = handleResync;
 
-        async function handleAdd(e) {
-            e.preventDefault();
-            const f = e.target;
-            if(!f.name.value || !f.bday.value) return alert("Name/Bday required");
-            const mDate = moment(f.bday.value);
-            const tx = db.transaction('officials', 'readwrite');
-            tx.objectStore('officials').add({
-                name: f.name.value, bday: mDate.toDate(), month: mDate.month()+1, day: mDate.date(),
-                monthDay: mDate.format('MM-DD'), pos: f.pos.value, mun: f.mun.value.toUpperCase(),
-                contact: f.contact.value, priority: 99, brgy: ''
-            });
-            tx.oncomplete = () => {
-                alert("Added!"); document.getElementById('modal-add').style.display='none';
-                f.reset(); refreshAll();
-            };
-        }
-    </script>
+    function handleExportCSV() {
+        if(!CURRENT_DATA.length) return alert("No data to export");
+        let csv = "Priority,Birthday,Name,Position,Barangay,Municipality,Contact,Logged\n";
+        CURRENT_DATA.forEach(p => {
+            csv += `P${p.priority},${moment(p.bday).format('YYYY-MM-DD')},"${p.name}","${p.pos}","${p.brgy}","${p.mun}","${p.contact}",${p.isLogged?'Yes':'No'}\n`;
+        });
+        const blob = new Blob([csv], {type:'text/csv'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'Birthday_Export.csv';
+        a.click();
+    }
+
+    async function handleAdd(e) {
+        e.preventDefault();
+        const f = e.target;
+        if(!f.name.value || !f.bday.value) return alert("Name/Bday required");
+        const mDate = moment(f.bday.value);
+        const tx = db.transaction('officials', 'readwrite');
+        tx.objectStore('officials').add({
+            name: f.name.value, bday: mDate.toDate(), month: mDate.month()+1, day: mDate.date(),
+            monthDay: mDate.format('MM-DD'), pos: f.pos.value, mun: f.mun.value.toUpperCase(),
+            contact: f.contact.value, priority: 99, brgy: ''
+        });
+        tx.oncomplete = () => {
+            alert("Added!"); document.getElementById('modal-add').style.display='none';
+            f.reset(); refreshAll();
+        };
+    }
+</script>
 </body>
 </html>
+
